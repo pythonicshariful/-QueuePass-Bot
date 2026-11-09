@@ -1,0 +1,15 @@
+{
+  "waiting_link": "",
+  "platform": "PSV",
+  "task_label": "PSV Ticket Drop",
+  "sessions": 5,
+  "proxies": [],
+  "discord_webhook_url": "",
+  "headless": true,
+  "allow_no_proxy": true,
+  "poll_interval_sec": 5,
+  "hold_minutes_after_pass": 10,
+  "stop_others_minutes_after_pass": 2,
+  "dashboard_port": 5055
+}
+
