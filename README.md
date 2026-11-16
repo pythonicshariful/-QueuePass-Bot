@@ -21,6 +21,7 @@ A multi-session real-browser Queue-it queue monitor and pass-link capture tool b
 ```text
 queue-pass-bot/
   START_QUEUE_BOT.bat    — One-click Windows launcher (auto-installs & opens Dashboard UI)
+  START_QUEUE_BOT.command — One-click Mac launcher (double-click; auto-installs & opens Dashboard UI)
   run.py                 — Entry point: no args = start dashboard; CLI args = headless/headed run
   app.py                 — Small launcher
   config.json            — Saved settings
@@ -48,6 +49,8 @@ On Windows, simply **double-click `START_QUEUE_BOT.bat`**:
 1. On first run, it automatically creates a `.venv` environment, installs all Python dependencies, and downloads the Chromium browser.
 2. It automatically opens the **Easy Dashboard (`http://127.0.0.1:5055`)** in your web browser.
 3. Everything — **waiting links, proxies (paste or load `.txt` file), proxy checking, session count, headless/visible windows, Discord webhook testing, and starting/stopping** — can be controlled directly inside the web dashboard without touching the terminal.
+
+On Mac, simply **double-click `START_QUEUE_BOT.command`** — it does the same setup (Python 3.11+ from python.org must be installed first; there is no "Add to PATH" tick box on Mac, that is Windows-only). If macOS blocks it the first time, right-click the file, choose **Open**, and confirm. If double-clicking opens the file as text instead of running it, open Terminal in the folder once and run `chmod +x START_QUEUE_BOT.command`, then double-click again.
 
 ---
 

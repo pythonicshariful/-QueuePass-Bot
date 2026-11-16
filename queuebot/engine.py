@@ -371,11 +371,24 @@ class QueuePassEngine:
             self._contexts[session_id] = context
             self._pages[session_id] = page
 
-            await page.goto(
-                parsed_link.original_url,
-                wait_until="domcontentloaded",
-                timeout=45000,
-            )
+            # Retry the initial page load: a single transient network failure
+            # must not kill the session before the sale starts.
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    await page.goto(
+                        parsed_link.original_url,
+                        wait_until="domcontentloaded",
+                        timeout=45000,
+                    )
+                    last_error = None
+                    break
+                except Exception as exc:  # noqa: BLE001 - retried, then surfaced
+                    last_error = exc
+                    if attempt < 2:
+                        await asyncio.sleep(3 * (attempt + 1))
+            if last_error is not None:
+                raise last_error
             await self._poll_single_session(session_id)
         except Exception as exc:
             with self._lock:
@@ -393,6 +406,21 @@ class QueuePassEngine:
 
         try:
             current_url = page.url or ""
+            # A browser error page is not a queue page: keep the session in
+            # error state instead of letting the empty-page parse report it
+            # as "waiting", which hides real load failures from the dashboard.
+            if current_url.startswith("chrome-error://"):
+                with self._lock:
+                    status = self.sessions.get(session_id)
+                    if status and status.state != "passed":
+                        status.state = "error"
+                        if not status.error_message:
+                            status.error_message = (
+                                "Browser could not load the queue page (chrome-error)."
+                            )
+                        status.current_url = current_url
+                        status.updated_at = datetime.now(timezone.utc).isoformat()
+                return
             try:
                 body_text = await page.inner_text("body", timeout=4000)
             except Exception:
