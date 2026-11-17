@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from queuebot.config import DEFAULT_CONFIG, get_default_config, load_config, save_config
-from queuebot.dashboard import create_app
+from queuebot.dashboard import create_app, resolve_start_config
 from queuebot.discord_notify import build_pass_embed_payload, send_discord_pass_webhook
 from queuebot.engine import QueuePassEngine
 from queuebot.linkparse import parse_waiting_link, validate_queue_host
@@ -557,3 +557,163 @@ def test_simulated_end_to_end_single_headless_chromium_session(
     finally:
         server.shutdown()
         server.server_close()
+
+
+# ---------------------------------------------------------------------------
+# 10. Period 4 (2026-11-17) live-test regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_queue_monitor_fixture_live_dutch_phrasing_period4() -> None:
+    """Live PSV wording seen in the Period 4 sale: spaced 'wachtrij nummer',
+    'wachtenden' ahead-count, and 'Dat is over' wait phrasing."""
+    fixture_text = """
+    U bevindt zich nu in de wachtrij.
+    Uw wachtrij nummer is: 6760
+    Aantal wachtenden voor u: 6.260
+    Dat is over: ongeveer 39 minuten
+    """
+    stats = parse_queue_page(
+        fixture_text,
+        current_url="https://psveindhoven.queue-it.net/?c=psveindhoven&e=psveventq548447",
+    )
+    assert stats.state == "in-queue"
+    assert stats.queue_number == 6760
+    assert stats.people_ahead == 6260
+    assert stats.estimated_wait == "39 minuten"
+
+
+def test_queue_monitor_fixture_live_dutch_variants() -> None:
+    text = """
+    Uw wachtrij nummer is 6504
+    Wachtenden voor u: 5.260
+    Dat is over 24 minuten
+    """
+    stats = parse_queue_page(text)
+    assert stats.queue_number == 6504
+    assert stats.people_ahead == 5260
+    assert stats.estimated_wait == "24 minuten"
+
+    text2 = (
+        "U bent over ongeveer 15 minuten aan de beurt. "
+        "Uw wachtrij nummer is: 1234. Aantal wachtenden voor u: 1.100"
+    )
+    stats2 = parse_queue_page(text2)
+    assert stats2.queue_number == 1234
+    assert stats2.people_ahead == 1100
+    assert stats2.estimated_wait == "15 minuten"
+
+
+def test_save_config_preserves_proxies_when_key_absent(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.json"
+    saved = get_default_config()
+    saved["proxies"] = ["192.0.2.1:8080", "192.0.2.2:8080:user:pass"]
+    save_config(saved, cfg_file)
+
+    # A partial save without the "proxies" key must not wipe saved proxies.
+    updated = save_config({"platform": "Liverpool", "sessions": 3}, cfg_file)
+    assert updated["proxies"] == ["192.0.2.1:8080", "192.0.2.2:8080:user:pass"]
+    assert updated["platform"] == "Liverpool"
+    assert load_config(cfg_file)["proxies"] == [
+        "192.0.2.1:8080",
+        "192.0.2.2:8080:user:pass",
+    ]
+
+    # An explicit empty list still clears (the deliberate clear path).
+    cleared = save_config({"proxies": []}, cfg_file)
+    assert cleared["proxies"] == []
+
+
+def test_save_config_main_paths_preserves_proxies_txt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for the Period 4 wipe: a save with no proxy key must keep
+    the proxies already stored in proxies.txt instead of rewriting it empty."""
+    import queuebot.config as config_mod
+
+    cfg_file = tmp_path / "config.json"
+    proxies_file = tmp_path / "proxies.txt"
+    monkeypatch.setattr(config_mod, "DEFAULT_CONFIG_PATH", cfg_file)
+    monkeypatch.setattr(config_mod, "DEFAULT_PROXIES_PATH", proxies_file)
+    proxies_file.write_text(
+        "# header\n198.51.100.1:8080\n198.51.100.2:8080:user:pass\n",
+        encoding="utf-8",
+    )
+
+    saved = save_config(
+        {
+            "waiting_link": "https://psveindhoven.queue-it.net/?c=x&e=y",
+            "sessions": 2,
+        }
+    )
+    assert saved["proxies"] == [
+        "198.51.100.1:8080",
+        "198.51.100.2:8080:user:pass",
+    ]
+    assert proxies_file.read_text(encoding="utf-8").count("198.51.100") == 2
+
+
+def test_resolve_start_config_new_proxies_override_saved_ones(
+    tmp_path: Path,
+) -> None:
+    cfg_file = tmp_path / "config.json"
+    saved = get_default_config()
+    saved["proxies"] = ["198.51.100.1:8080"]
+    save_config(saved, cfg_file)
+
+    cfg = resolve_start_config(
+        {"proxies": ["203.0.113.9:3128"], "sessions": 4}, cfg_file
+    )
+    assert cfg["proxies"] == ["203.0.113.9:3128"]
+    assert cfg["sessions"] == 4
+
+    # An empty start payload keeps everything saved.
+    cfg2 = resolve_start_config({}, cfg_file)
+    assert cfg2["proxies"] == ["203.0.113.9:3128"]
+
+
+def test_api_start_preserves_saved_proxies_when_payload_has_empty_list(
+    tmp_path: Path,
+) -> None:
+    """Regression for the Period 4 defect: /api/start with "proxies": []
+    must run with the saved proxies instead of wiping them and going Direct."""
+    cfg_file = tmp_path / "config.json"
+    data_dir = tmp_path / "data"
+    saved = get_default_config()
+    saved["proxies"] = ["198.51.100.1:8080", "198.51.100.2:8080:user:pass"]
+    save_config(saved, cfg_file)
+
+    flask_app = create_app(config_path=cfg_file, data_dir=data_dir)
+    client = flask_app.test_client()
+
+    captured: dict[str, Any] = {}
+
+    class _FakeEngine:
+        def __init__(self, cfg: dict[str, Any], data_dir: Any = None) -> None:
+            captured["config"] = cfg
+            self.running = False
+
+        def start_in_background(self) -> None:
+            self.running = True
+
+        def get_status(self) -> dict[str, Any]:
+            return {"running": True, "sessions": []}
+
+    with patch("queuebot.dashboard.QueuePassEngine", _FakeEngine):
+        res = client.post(
+            "/api/start",
+            json={
+                "waiting_link": "https://psveindhoven.queue-it.net/?c=psveindhoven&e=psveventq548447&t=https%3A%2F%2Fticketshop.psv.nl%2F&cid=nl-NL",
+                "sessions": 2,
+                "proxies": [],
+            },
+        )
+    assert res.status_code == 200
+    assert captured["config"]["proxies"] == [
+        "198.51.100.1:8080",
+        "198.51.100.2:8080:user:pass",
+    ]
+    assert load_config(cfg_file)["proxies"] == [
+        "198.51.100.1:8080",
+        "198.51.100.2:8080:user:pass",
+    ]

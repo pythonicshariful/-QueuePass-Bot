@@ -25,6 +25,27 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def _clean_proxy_lines(lines: list[str] | str) -> list[str]:
+    """Return proxy lines stripped of blanks and comments."""
+    if isinstance(lines, str):
+        lines = lines.splitlines()
+    return [
+        str(line).strip()
+        for line in lines
+        if str(line).strip() and not str(line).strip().startswith("#")
+    ]
+
+
+def _read_proxy_file_lines(proxies_path: Path) -> list[str]:
+    """Read proxy lines from proxies.txt, ignoring blanks and comments."""
+    try:
+        return _clean_proxy_lines(
+            proxies_path.read_text(encoding="utf-8").splitlines()
+        )
+    except OSError:
+        return []
+
+
 def get_default_config() -> dict[str, Any]:
     """Return a fresh copy of the default configuration."""
     cfg = dict(DEFAULT_CONFIG)
@@ -77,32 +98,46 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
     # Fallback to proxies.txt if config proxies list is empty and proxies.txt has entries
     if not cfg["proxies"] and path is None and DEFAULT_PROXIES_PATH.exists():
-        try:
-            file_proxies = [
-                line.strip()
-                for line in DEFAULT_PROXIES_PATH.read_text(encoding="utf-8").splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            ]
-            if file_proxies:
-                cfg["proxies"] = file_proxies
-        except OSError:
-            pass
+        file_proxies = _read_proxy_file_lines(DEFAULT_PROXIES_PATH)
+        if file_proxies:
+            cfg["proxies"] = file_proxies
 
     return cfg
 
 
 def save_config(config: dict[str, Any], path: str | Path | None = None) -> dict[str, Any]:
-    """Save configuration dictionary to JSON file and return normalized config."""
+    """Save configuration dictionary to JSON file and return normalized config.
+
+    A save that omits the "proxies" key keeps the previously saved proxies
+    (from the existing config file, or from proxies.txt when saving the main
+    config). Saving must never silently destroy the on-disk proxy list: a
+    partial save once wiped proxies.txt to a header-only file and every
+    session then ran without a proxy. To clear proxies deliberately, save
+    with an explicit empty "proxies" list (the dashboard Save button does
+    this when its proxy textarea is empty).
+    """
     config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+    proxies_provided = "proxies" in config
     merged = get_default_config()
     merged.update(config)
 
     if isinstance(merged.get("proxies"), str):
-        merged["proxies"] = [
-            line.strip()
-            for line in merged["proxies"].splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
+        merged["proxies"] = _clean_proxy_lines(merged["proxies"])
+    elif isinstance(merged.get("proxies"), list):
+        merged["proxies"] = _clean_proxy_lines(merged["proxies"])
+
+    if not proxies_provided:
+        preserved: list[str] = []
+        if config_path.exists():
+            try:
+                raw_existing = json.loads(config_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                raw_existing = None
+            if isinstance(raw_existing, dict):
+                preserved = _clean_proxy_lines(raw_existing.get("proxies") or [])
+        if not preserved and path is None:
+            preserved = _read_proxy_file_lines(DEFAULT_PROXIES_PATH)
+        merged["proxies"] = preserved
 
     merged["sessions"] = max(1, int(merged.get("sessions", 5)))
     merged["headless"] = bool(merged.get("headless", True))

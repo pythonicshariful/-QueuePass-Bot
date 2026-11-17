@@ -836,6 +836,50 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 """
 
 
+def resolve_start_config(
+    payload: dict[str, Any] | None,
+    config_path: str | Path | None,
+) -> dict[str, Any]:
+    """Merge a start payload onto the saved config and persist the result.
+
+    A start request carries overrides, not a full replacement: keys the
+    payload omits keep their saved values. In particular, an empty or
+    missing proxy list in the payload keeps the saved proxies (from
+    config.json or proxies.txt) instead of wiping them — a start payload
+    with an empty proxy list once rewrote proxies.txt to a header-only
+    file, so all sessions ran without a proxy. To run without proxies
+    deliberately, clear them with Save Settings first (or empty
+    proxies.txt), then start.
+    """
+    existing = load_config(config_path)
+    if not payload:
+        return existing
+
+    merged = dict(existing)
+    for key, value in payload.items():
+        if key == "proxies":
+            if isinstance(value, str):
+                cleaned = [
+                    line.strip()
+                    for line in value.splitlines()
+                    if line.strip() and not line.strip().startswith("#")
+                ]
+            elif isinstance(value, list):
+                cleaned = [
+                    str(item).strip()
+                    for item in value
+                    if str(item).strip() and not str(item).strip().startswith("#")
+                ]
+            else:
+                cleaned = []
+            if cleaned:
+                merged["proxies"] = cleaned
+            # Empty proxy list in a start payload: keep the saved proxies.
+        else:
+            merged[key] = value
+    return save_config(merged, config_path)
+
+
 def create_app(
     config_path: str | Path | None = None,
     data_dir: str | Path | None = None,
@@ -1002,10 +1046,7 @@ def create_app(
             return jsonify({"ok": False, "error": "Engine is already running."}), 400
 
         payload = request.get_json(silent=True)
-        if payload:
-            cfg = save_config(payload, flask_app.config["CONFIG_PATH"])
-        else:
-            cfg = load_config(flask_app.config["CONFIG_PATH"])
+        cfg = resolve_start_config(payload, flask_app.config["CONFIG_PATH"])
 
         new_engine = QueuePassEngine(cfg, data_dir=flask_app.config["DATA_DIR"])
         try:

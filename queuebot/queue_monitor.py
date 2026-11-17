@@ -53,6 +53,8 @@ _ENTRY_WINDOW_PATTERNS = [
 _QUEUE_NUMBER_PATTERNS = [
     re.compile(
         r"(?:your\s+queue\s+number(?:\s+is)?|queue\s+number|queue\s+id|"
+        r"uw\s+wachtrij\s+nummer(?:\s+is)?|je\s+wachtrij\s+nummer(?:\s+is)?|"
+        r"wachtrij\s+nummer(?:\s+is)?|"
         r"uw\s+(?:wacht)?rijnummer(?:\s+is)?|je\s+(?:wacht)?rijnummer(?:\s+is)?|"
         r"wachtrijnummer|rijnummer)\s*[:#-]?\s*([0-9][0-9.,]*)",
         re.IGNORECASE,
@@ -64,8 +66,12 @@ _PEOPLE_AHEAD_PATTERNS = [
         r"(?:number\s+of\s+users\s+in\s+line\s+ahead\s+of\s+you|"
         r"users\s+(?:in\s+line\s+)?ahead\s+of\s+you|"
         r"people\s+ahead\s+of\s+you|"
-        r"aantal\s+(?:gebruikers|mensen|personen|bezoekers)\s+(?:in\s+de\s+rij\s+)?voor\s+(?:u|je)|"
+        r"aantal\s+(?:gebruikers|mensen|personen|bezoekers|wachtenden)\s+(?:in\s+de\s+rij\s+)?voor\s+(?:u|je)|"
         r"gebruikers\s+voor\s+(?:u|je))\s*[:#-]?\s*([0-9][0-9.,]*)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwachtenden\s+voor\s+(?:u|je)\s*[:#-]?\s*([0-9][0-9.,]*)",
         re.IGNORECASE,
     ),
     re.compile(
@@ -91,6 +97,14 @@ _LABELED_WAIT_PATTERNS = [
         r"(?:ongeveer\s+|circa\s+|about\s+|approx\.?\s+|~\s*)?\d+\s*(?:uur|uren|minuten|minuut|minutes?|mins?|hours?|hrs?)(?:\s+(?:en|and)\s+\d+\s*(?:minuten|minutes?|mins?))?)",
         re.IGNORECASE,
     ),
+    # Live PSV phrasing: "Dat is over: ongeveer 39 minuten",
+    # "Dat is over 24 minuten", "U bent over ongeveer 15 minuten aan de beurt".
+    re.compile(
+        r"(?:dat\s+is\s+over|u\s+bent\s+over|je\s+bent\s+over)\s*[:#-]?\s*"
+        r"(?:ongeveer\s+|circa\s+|about\s+|approx\.?\s+|~\s*)?"
+        r"(\d+\s*(?:uur|uren|minuten|minuut|minutes?|mins?|hours?|hrs?)(?:\s+(?:en|and)\s+\d+\s*(?:minuten|minutes?|mins?))?)",
+        re.IGNORECASE,
+    ),
 ]
 
 _STANDALONE_WAIT_PATTERNS = [
@@ -104,6 +118,11 @@ _STANDALONE_WAIT_PATTERNS = [
     ),
     re.compile(
         r"\b(\d+\s*(?:minuten|minuut|minutes?|mins?))\s+(?:remaining|left|resterend|wachttijd)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bover\s+(?:ongeveer\s+|circa\s+|about\s+|approx\.?\s+|~\s*)"
+        r"(\d+\s*(?:minuten|minuut|uur|uren|minutes?|mins?|hours?|hrs?))\b",
         re.IGNORECASE,
     ),
 ]
